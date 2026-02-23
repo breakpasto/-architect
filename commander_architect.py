@@ -3,7 +3,7 @@ import requests
 import re
 import urllib.parse
 
-st.set_page_config(page_title="Commander Architect v4.0", page_icon="🧙‍♂️", layout="wide")
+st.set_page_config(page_title="Commander Architect v4.1", page_icon="🧙‍♂️", layout="wide")
 
 def get_card(name):
     try:
@@ -21,11 +21,11 @@ def get_market_price(card_name):
     except: return 0.0
 
 # --- INTERFACCIA ---
-st.title("🧙‍♂️ Commander Architect v4.0")
+st.title("🧙‍♂️ Commander Architect v4.1")
 
 with st.sidebar:
     st.header("⚙️ Configurazione")
-    cmd_name = st.text_input("Inserisci Comandante:", placeholder="Es: Kenrith, the Returned King")
+    cmd_name = st.text_input("Inserisci Comandante:", placeholder="Es: Ghave, Guru of Spores")
 
 if cmd_name:
     cmd_data = get_card(cmd_name)
@@ -37,31 +37,30 @@ if cmd_name:
             st.metric("Costo Comandante", f"{cmd_data.get('prices', {}).get('eur', '0.00')} €")
         
         with col2:
-            st.subheader("🔗 Collegamenti Esterni Strategici")
+            st.subheader("🔗 Database Combo & Sinergie")
             
-            # --- GENERATORE DI LINK COMBO ---
-            # Puliamo il nome per il link di Commander Spellbook
-            search_query = urllib.parse.quote(f"commander:\"{cmd_name}\"")
-            spellbook_url = f"https://commandspellbook.com/search/?q={search_query}"
+            # --- NUOVO GENERATORE DI LINK (FORMATTAZIONE PRECISA) ---
+            # Cerchiamo tutte le combo che includono questa specifica carta
+            raw_query = f'card:"{cmd_name}"'
+            encoded_query = urllib.parse.quote(raw_query)
+            spellbook_url = f"https://commandspellbook.com/search/?q={encoded_query}"
             
-            st.markdown(f"""
-            L'app ha generato una ricerca personalizzata per le combo del tuo comandante.
-            Clicca il pulsante qui sotto per vederle tutte sul database ufficiale:
-            """)
+            st.info(f"Cliccando il tasto sotto verrai indirizzato alla ricerca esatta per **{cmd_name}**.")
             
-            st.link_button(f"🔥 Vedi Combo di {cmd_name}", spellbook_url, type="primary")
+            st.link_button(f"🔥 Apri Combo per {cmd_name}", spellbook_url, type="primary")
             
             st.divider()
             
             # --- LINK EDHREC ---
-            edhrec_name = cmd_name.lower().replace(",", "").replace("'", "").replace(" ", "-")
-            edhrec_url = f"https://edhrec.com/commanders/{edhrec_name}"
-            st.link_button(f"📊 Vedi Sinergie su EDHREC", edhrec_url)
+            # EDHREC usa uno slug senza punteggiatura e con trattini
+            edh_slug = cmd_name.lower().replace(",", "").replace("'", "").replace(" ", "-")
+            edhrec_url = f"https://edhrec.com/commanders/{edh_slug}"
+            st.link_button(f"📊 Strategie su EDHREC", edhrec_url)
 
-    # --- SEZIONE BUDGET (99 CARTE) ---
+    # --- SEZIONE BUDGET ---
     st.divider()
     st.subheader("📝 Calcolo Budget 100€")
-    lista = st.text_area("Incolla la lista (es. da Moxfield):", height=200)
+    lista = st.text_area("Incolla la lista (99 carte):", height=150)
     
     if st.button("Verifica Prezzi", type="primary"):
         if lista:
@@ -76,7 +75,6 @@ if cmd_name:
                     st.write(f"{nome}: {p:.2f} €")
             
             st.divider()
-            is_ok = totale <= 100
-            st.metric("TOTALE", f"{totale:.2f} €", delta=f"{100-totale:.2f} €")
-            if is_ok: st.balloons()
+            st.metric("TOTALE MAZZO", f"{totale:.2f} €", delta=f"{100-totale:.2f} €")
+            if totale <= 100: st.balloons()
             else: st.error("Mazzo fuori budget!")
