@@ -5,7 +5,7 @@ import time
 import urllib.parse
 
 # Configurazione della pagina
-st.set_page_config(page_title="Commander Architect v2.1", page_icon="🧙‍♂️", layout="wide")
+st.set_page_config(page_title="Commander Architect v2.3", page_icon="🧙‍♂️", layout="wide")
 
 # --- FUNZIONI API ---
 
@@ -40,32 +40,39 @@ def get_suggestions(colors):
         return []
 
 def get_combos(commander_name):
-    """Interroga Commander Spellbook con gestione errori migliorata."""
-    # Pulizia del nome per l'URL dell'API
-    safe_name = urllib.parse.quote(f'"{commander_name}"')
-    url = f"https://backend.commandspellbook.com/api/variants/?q={safe_name}"
+    """Interroga Commander Spellbook con gestione errori DNS e nuovi endpoint."""
+    # Usiamo il filtro "q" per cercare il comandante nel database delle varianti
+    safe_name = urllib.parse.quote(commander_name)
+    url = f"https://backend.commandspellbook.com/variants/?q={safe_name}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "application/json"
+    }
     
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
             data = r.json()
-            return data.get('results', [])
-        else:
-            return []
-    except Exception as e:
-        st.error(f"Errore di connessione al database combo: {e}")
+            # La risposta può essere una lista o un dizionario con 'results'
+            if isinstance(data, dict):
+                return data.get('results', [])
+            return data
         return []
+    except Exception as e:
+        # Messaggio di errore tecnico in console, ma l'utente vede un alert pulito
+        return None
 
 # --- INTERFACCIA UTENTE ---
 
-st.title("🧙‍♂️ Commander Deck Architect v2.1")
+st.title("🧙‍♂️ Commander Deck Architect v2.3")
 st.markdown("##### Sviluppo Mazzi Budget 100€ (Comandante Escluso)")
 
 with st.sidebar:
     st.header("⚙️ Configurazione")
     cmd_name = st.text_input("Inserisci il tuo Comandante:", placeholder="Es: Ghave, Guru of Spores")
     st.divider()
-    st.info("L'app cerca combo e suggerimenti basandosi sui dati in tempo reale di Scryfall e Commander Spellbook.")
+    st.info("L'app calcola il budget escludendo il costo del comandante scelto.")
 
 if cmd_name:
     cmd_data = get_card(cmd_name)
@@ -80,29 +87,33 @@ if cmd_name:
             tab1, tab2 = st.tabs(["🔥 Top 10 Combo", "💡 Suggerimenti Budget"])
             
             with tab1:
-                st.subheader(f"Combo con {cmd_name}")
-                with st.spinner("Interrogazione database Commander Spellbook..."):
+                st.subheader(f"Combo rilevate per {cmd_name}")
+                with st.spinner("Connessione a Commander Spellbook in corso..."):
                     combos = get_combos(cmd_name)
                 
-                if combos:
+                if combos is None:
+                    st.warning("⚠️ Impossibile raggiungere il database delle combo. Potrebbe esserci un problema temporaneo di rete o DNS.")
+                elif combos:
+                    # Mostra fino a 10 combo
                     for i, c in enumerate(combos[:10]):
-                        # Estrae nomi delle carte coinvolte
-                        other_cards = [card['card']['name'] for card in c['uses'] if card['card']['name'].lower() != cmd_name.lower()]
-                        title = f"Combo #{i+1}: {cmd_name} + {', '.join(other_cards[:2])}"
+                        # Estrae nomi delle altre carte
+                        uses = c.get('uses', [])
+                        other_cards = [u['card']['name'] for u in uses if u['card']['name'].lower() != cmd_name.lower()]
+                        title = f"Combo #{i+1}: {', '.join(other_cards[:2])}"
                         
                         with st.expander(title):
                             st.markdown("**Componenti della combo:**")
-                            for card in c['uses']:
-                                st.write(f"- {card['card']['name']}")
+                            for u in uses:
+                                st.write(f"- {u['card']['name']}")
                             
                             st.markdown("**Risultato:**")
-                            res_names = [r['name'] for r in c['results']]
-                            st.success(f"🎯 {', '.join(res_names)}")
+                            results = [r['name'] for r in c.get('results', [])]
+                            st.success(f"🎯 {', '.join(results)}")
                             
-                            st.markdown("**Come funziona:**")
-                            st.caption(c['description'])
+                            st.markdown("**Esecuzione:**")
+                            st.caption(c.get('description', 'Descrizione non disponibile.'))
                 else:
-                    st.warning(f"Nessuna combo specifica trovata per '{cmd_name}'. Prova a verificare il nome esatto (es. includi virgole).")
+                    st.info(f"Nessuna combo specifica trovata per '{cmd_name}'.")
             
             with tab2:
                 st.subheader("Sinergie Budget (< 2.50€)")
@@ -116,10 +127,10 @@ if cmd_name:
                 else:
                     st.write("Nessun suggerimento trovato.")
 
-    # --- SEZIONE LISTA E BUDGET ---
+    # --- SEZIONE CALCOLO BUDGET ---
     st.divider()
-    st.subheader("📝 Verifica Budget Mainboard")
-    lista_deck = st.text_area("Incolla qui la tua lista (99 carte):", height=200, placeholder="1 Sol Ring\n1 Arcane Signet...")
+    st.subheader("📝 Verifica Budget Mainboard (Le altre 99 carte)")
+    lista_deck = st.text_area("Incolla la lista (esportazione Moxfield o testo semplice):", height=200)
     
     if st.button("Calcola Totale Mainboard", type="primary"):
         if lista_deck:
@@ -127,36 +138,39 @@ if cmd_name:
             totale_main = 0.0
             status_calc = st.empty()
             
-            with st.expander("Dettaglio Prezzi Singoli"):
+            with st.expander("Dettaglio Prezzi Mainboard"):
                 for l in linee:
+                    # Estrazione pulita del nome
                     nome_pulito = re.sub(r'^(\d+x?|x)\s+', '', l).split(' (')[0].strip()
                     
+                    # Escludiamo il comandante se presente nella lista
                     if nome_pulito.lower() == cmd_name.lower():
-                        st.info(f"ℹ️ {nome_pulito}: Identificato come Comandante (Costo 0.00€)")
+                        st.info(f"ℹ️ {nome_pulito}: Comandante rilevato (Costo 0.00€)")
                         continue
                         
-                    status_calc.text(f"🔍 Prezzo: {nome_pulito}...")
+                    status_calc.text(f"🔍 Recupero prezzo: {nome_pulito}...")
                     prezzo = get_market_price(nome_pulito)
                     totale_main += prezzo
                     st.write(f"{nome_pulito}: {prezzo:.2f}€")
-                    time.sleep(0.05)
+                    time.sleep(0.05) # Delay cortesia per API
             
             status_calc.empty()
             st.divider()
             
+            # Verdetto Finale
             is_legale = totale_main <= 100
             if is_legale:
                 st.balloons()
-                st.success(f"### MAZZO LEGALE: {totale_main:.2f} €")
+                st.header(f"✅ MAZZO BUDGET: {totale_main:.2f} €")
             else:
-                st.error(f"### MAZZO FUORI BUDGET: {totale_main:.2f} €")
+                st.header(f"❌ FUORI BUDGET: {totale_main:.2f} €")
             
             st.progress(min(totale_main / 100, 1.0))
             
             c1, c2 = st.columns(2)
             c1.metric("Totale Speso", f"{totale_main:.2f} €")
-            c2.metric("Differenza Budget", f"{100 - totale_main:.2f} €", delta_color="normal" if is_legale else "inverse")
+            c2.metric("Disponibilità", f"{100 - totale_main:.2f} €", delta_color="normal" if is_legale else "inverse")
         else:
-            st.warning("Inserisci una lista per il calcolo.")
+            st.warning("Inserisci la lista delle carte per calcolare il budget.")
 else:
-    st.info("Inserisci il nome di un comandante nella barra laterale per caricare dati e combo.")
+    st.info("👈 Inserisci il nome del tuo Comandante nella barra laterale per iniziare!")
