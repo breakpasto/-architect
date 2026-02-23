@@ -4,12 +4,15 @@ import re
 import time
 import urllib.parse
 
-st.set_page_config(page_title="Commander Architect v2.4", page_icon="🧙‍♂️", layout="wide")
+# Configurazione Pagina
+st.set_page_config(page_title="Commander Architect v2.5", page_icon="🧙‍♂️", layout="wide")
 
 # --- FUNZIONI API ---
 
 def get_card(name):
-    url = f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(name)}"
+    """Recupera dati carta da Scryfall."""
+    safe_name = urllib.parse.quote(name)
+    url = f"https://api.scryfall.com/cards/named?exact={safe_name}"
     try:
         r = requests.get(url, timeout=10)
         return r.json() if r.status_code == 200 else None
@@ -17,7 +20,9 @@ def get_card(name):
         return None
 
 def get_market_price(card_name):
-    url = f"https://api.scryfall.com/cards/search?q=!\"{urllib.parse.quote(card_name)}\"&unique=prints"
+    """Recupera il prezzo medio (Trend) da Scryfall."""
+    safe_name = urllib.parse.quote(card_name)
+    url = f"https://api.scryfall.com/cards/search?q=!\"{safe_name}\"&unique=prints"
     try:
         r = requests.get(url, timeout=10).json()
         prices = [float(p['prices']['eur']) for p in r['data'] if p.get('prices', {}).get('eur')]
@@ -26,6 +31,7 @@ def get_market_price(card_name):
         return 0.0
 
 def get_suggestions(colors):
+    """Suggerimenti budget basati su EDHREC."""
     c_query = "".join(colors) if colors else "c"
     query = f"f:commander id<={c_query} eur<2.5 status:legal"
     url = f"https://api.scryfall.com/cards/search?q={urllib.parse.quote(query)}&order=edhrec"
@@ -34,6 +40,135 @@ def get_suggestions(colors):
         return r.get('data', [])[:12]
     except:
         return []
+
+def get_combos(commander_name):
+    """Ricerca combo con gestione errori DNS e fallback."""
+    # Proviamo l'endpoint principale
+    safe_name = urllib.parse.quote(commander_name)
+    url = f"https://backend.commandspellbook.com/variants/?q={safe_name}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MTG-Architect/1.0",
+        "Accept": "application/json"
+    }
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=12)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                return data.get('results', [])
+            return data if isinstance(data, list) else []
+        return []
+    except Exception:
+        # Se il DNS fallisce o il server è giù, restituiamo None per segnalare l'errore
+        return None
+
+# --- INTERFACCIA UTENTE ---
+
+st.title("🧙‍♂️ Commander Deck Architect v2.5")
+st.markdown("##### Crea mazzi budget (100€ Mainboard - Comandante Escluso)")
+
+with st.sidebar:
+    st.header("⚙️ Settings")
+    cmd_input = st.text_input("Nome Comandante:", placeholder="Es: Ghave, Guru of Spores")
+    st.divider()
+    st.caption("L'app separa automaticamente il costo del comandante dal resto del mazzo.")
+
+if cmd_input:
+    cmd_data = get_card(cmd_input)
+    if cmd_data:
+        # Layout Comandante
+        c_col1, c_col2 = st.columns([1, 2])
+        
+        with c_col1:
+            st.image(cmd_data['image_uris']['normal'], use_container_width=True)
+            st.metric("Prezzo Comandante", f"{cmd_data.get('prices', {}).get('eur', '0.00')} €")
+            st.caption("(Escluso dal budget di 100€)")
+        
+        with c_col2:
+            tab_combo, tab_sug = st.tabs(["🔥 Top 10 Combo", "💡 Suggerimenti Budget"])
+            
+            with tab_combo:
+                st.subheader("Combo da Commander Spellbook")
+                with st.spinner("Ricerca combo in corso..."):
+                    combos = get_combos(cmd_input)
+                
+                if combos is None:
+                    st.warning("⚠️ Database Combo non raggiungibile (Errore di connessione). Riprova tra poco.")
+                elif combos:
+                    for i, c in enumerate(combos[:10]):
+                        uses = c.get('uses', [])
+                        # Titolo combo basato sulle carte coinvolte
+                        other_cards = [u['card']['name'] for u in uses if u['card']['name'].lower() != cmd_input.lower()]
+                        title = f"Combo #{i+1}: {', '.join(other_cards[:2])}"
+                        
+                        with st.expander(title):
+                            st.write("**Carte Necessarie:**")
+                            for u in uses: st.write(f"- {u['card']['name']}")
+                            
+                            res = [r['name'] for r in c.get('results', [])]
+                            st.success(f"🎯 Effetto: {', '.join(res)}")
+                            
+                            st.markdown("**Procedimento:**")
+                            st.caption(c.get('description', 'Nessuna descrizione disponibile.'))
+                else:
+                    st.info("Nessuna combo specifica trovata per questo comandante.")
+            
+            with tab_sug:
+                st.subheader("Pezzi Sinergici Budget (< 2.5€)")
+                suggestions = get_suggestions(cmd_data['color_identity'])
+                if suggestions:
+                    s_cols = st.columns(3)
+                    for idx, s in enumerate(suggestions):
+                        with s_cols[idx % 3]:
+                            st.write(f"**{s['name']}**")
+                            st.caption(f"{s.get('prices', {}).get('eur', 'N/A')} €")
+                else:
+                    st.write("Nessun suggerimento trovato.")
+
+    # --- SEZIONE CALCOLO BUDGET ---
+    st.divider()
+    st.subheader("📝 Builder Mainboard (99 carte)")
+    deck_list = st.text_area("Incolla la tua lista qui:", height=200, placeholder="1 Sol Ring\n1 Arcane Signet...")
+    
+    if st.button("Verifica Budget", type="primary"):
+        if deck_list:
+            linee = [l.strip() for l in deck_list.split("\n") if l.strip()]
+            totale_prezzo = 0.0
+            
+            status_calc = st.empty()
+            with st.expander("Dettaglio Analisi Prezzi"):
+                for riga in linee:
+                    # Estrazione pulita del nome
+                    nome = re.sub(r'^(\d+x?|x)\s+', '', riga).split(' (')[0].strip()
+                    
+                    if nome.lower() == cmd_input.lower():
+                        st.info(f"ℹ️ {nome}: Comandante rilevato (Prezzo ignorato)")
+                        continue
+                    
+                    status_calc.text(f"🔍 Cerco: {nome}...")
+                    p = get_market_price(nome)
+                    totale_prezzo += p
+                    st.write(f"{nome}: **{p:.2f} €**")
+                    time.sleep(0.05)
+            
+            status_calc.empty()
+            st.divider()
+            
+            # Verdetto Finale
+            is_ok = totale_prezzo <= 100
+            st.metric("TOTALE MAINBOARD", f"{totale_prezzo:.2f} €", delta=f"{100-totale_prezzo:.2f} € rimasti", delta_color="normal" if is_ok else "inverse")
+            
+            if is_ok:
+                st.success("✅ Il mazzo rispetta il budget di 100€!")
+                st.balloons()
+            else:
+                st.error(f"❌ Sei fuori budget di {totale_prezzo - 100:.2f} €")
+        else:
+            st.warning("Inserisci una lista di carte per eseguire il calcolo.")
+else:
+    st.info("Digita il nome del comandante nella barra laterale per iniziare l'analisi.")
 
 def get_combos(commander_name):
     """Versione Ultra-Resiliente con fallback"""
