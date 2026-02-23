@@ -3,7 +3,7 @@ import requests
 import re
 import urllib.parse
 
-st.set_page_config(page_title="Commander Architect v4.1", page_icon="🧙‍♂️", layout="wide")
+st.set_page_config(page_title="Commander Architect v4.2", page_icon="🧙‍♂️", layout="wide")
 
 def get_card(name):
     try:
@@ -21,7 +21,7 @@ def get_market_price(card_name):
     except: return 0.0
 
 # --- INTERFACCIA ---
-st.title("🧙‍♂️ Commander Architect v4.1")
+st.title("🧙‍♂️ Commander Architect v4.2")
 
 with st.sidebar:
     st.header("⚙️ Configurazione")
@@ -39,20 +39,20 @@ if cmd_name:
         with col2:
             st.subheader("🔗 Database Combo & Sinergie")
             
-            # --- NUOVO GENERATORE DI LINK (FORMATTAZIONE PRECISA) ---
-            # Cerchiamo tutte le combo che includono questa specifica carta
-            raw_query = f'card:"{cmd_name}"'
-            encoded_query = urllib.parse.quote(raw_query)
-            spellbook_url = f"https://commandspellbook.com/search/?q={encoded_query}"
+            # --- GENERATORE DI LINK CORRETTO ---
+            # 1. Usiamo 'commanderspellbook.com' (con la S)
+            # 2. Formattiamo esattamente come il loro motore di ricerca interno
+            # Sostituiamo gli spazi con %20 e le virgole con %2C
+            formatted_name = cmd_name.replace(" ", "%20").replace(",", "%2C")
+            spellbook_url = f"https://commanderspellbook.com/search/?q={formatted_name}"
             
-            st.info(f"Cliccando il tasto sotto verrai indirizzato alla ricerca esatta per **{cmd_name}**.")
+            st.info(f"Clicca il tasto sotto per aprire le combo di **{cmd_name}** direttamente su Commander Spellbook.")
             
-            st.link_button(f"🔥 Apri Combo per {cmd_name}", spellbook_url, type="primary")
+            st.link_button(f"🔥 Vedi Combo di {cmd_name}", spellbook_url, type="primary")
             
             st.divider()
             
-            # --- LINK EDHREC ---
-            # EDHREC usa uno slug senza punteggiatura e con trattini
+            # Link EDHREC (sempre utile)
             edh_slug = cmd_name.lower().replace(",", "").replace("'", "").replace(" ", "-")
             edhrec_url = f"https://edhrec.com/commanders/{edh_slug}"
             st.link_button(f"📊 Strategie su EDHREC", edhrec_url)
@@ -66,7 +66,7 @@ if cmd_name:
         if lista:
             linee = [l.strip() for l in lista.split("\n") if l.strip()]
             totale = 0.0
-            with st.expander("Dettaglio Prezzi"):
+            with st.expander("Dettaglio Analisi Prezzi"):
                 for l in linee:
                     nome = re.sub(r'^(\d+x?|x)\s+', '', l).split(' (')[0].strip()
                     if nome.lower() == cmd_name.lower(): continue
@@ -75,6 +75,7 @@ if cmd_name:
                     st.write(f"{nome}: {p:.2f} €")
             
             st.divider()
+            is_ok = totale <= 100
             st.metric("TOTALE MAZZO", f"{totale:.2f} €", delta=f"{100-totale:.2f} €")
-            if totale <= 100: st.balloons()
+            if is_ok: st.balloons()
             else: st.error("Mazzo fuori budget!")
