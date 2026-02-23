@@ -4,13 +4,11 @@ import re
 import time
 import urllib.parse
 
-# Configurazione della pagina
-st.set_page_config(page_title="Commander Architect v2.3", page_icon="🧙‍♂️", layout="wide")
+st.set_page_config(page_title="Commander Architect v2.4", page_icon="🧙‍♂️", layout="wide")
 
 # --- FUNZIONI API ---
 
 def get_card(name):
-    """Recupera i dati della carta da Scryfall."""
     url = f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(name)}"
     try:
         r = requests.get(url, timeout=10)
@@ -19,7 +17,6 @@ def get_card(name):
         return None
 
 def get_market_price(card_name):
-    """Recupera il prezzo medio (Trend) da Scryfall."""
     url = f"https://api.scryfall.com/cards/search?q=!\"{urllib.parse.quote(card_name)}\"&unique=prints"
     try:
         r = requests.get(url, timeout=10).json()
@@ -29,11 +26,107 @@ def get_market_price(card_name):
         return 0.0
 
 def get_suggestions(colors):
-    """Suggerisce carte budget basate su popolarità EDHREC."""
     c_query = "".join(colors) if colors else "c"
     query = f"f:commander id<={c_query} eur<2.5 status:legal"
     url = f"https://api.scryfall.com/cards/search?q={urllib.parse.quote(query)}&order=edhrec"
     try:
+        r = requests.get(url, timeout=10).json()
+        return r.get('data', [])[:12]
+    except:
+        return []
+
+def get_combos(commander_name):
+    """Versione Ultra-Resiliente con fallback"""
+    # Proviamo diversi endpoint in ordine di stabilità
+    endpoints = [
+        f"https://backend.commandspellbook.com/variants/?q={urllib.parse.quote(commander_name)}",
+        f"https://backend.commandspellbook.com/api/variants/?q={urllib.parse.quote(commander_name)}"
+    ]
+    
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MTG-Budget-App/3.0"}
+    
+    for url in endpoints:
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict) and 'results' in data:
+                    return data['results']
+                if isinstance(data, list):
+                    return data
+        except:
+            continue # Se fallisce questo endpoint, prova il prossimo
+    
+    return [] # Se tutti i tentativi falliscono, restituisce vuoto senza errore
+
+# --- INTERFACCIA ---
+
+st.title("🧙‍♂️ Commander Architect v2.4")
+
+with st.sidebar:
+    st.header("⚙️ Configurazione")
+    cmd_name = st.text_input("Inserisci Comandante:", placeholder="Es: Ghave, Guru of Spores")
+
+if cmd_name:
+    cmd_data = get_card(cmd_name)
+    if cmd_data:
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.image(cmd_data['image_uris']['normal'], use_container_width=True)
+            st.metric("Budget Escluso", f"{cmd_data.get('prices', {}).get('eur', '0.00')} €")
+        
+        with col2:
+            tab1, tab2 = st.tabs(["🔥 Top 10 Combo", "💡 Suggerimenti Budget"])
+            
+            with tab1:
+                st.subheader("Combo Rilevate")
+                # Se la connessione fallisce del tutto, usiamo un messaggio più utile
+                try:
+                    combos = get_combos(cmd_name)
+                    if combos:
+                        for i, c in enumerate(combos[:10]):
+                            uses = c.get('uses', [])
+                            other_cards = [u['card']['name'] for u in uses if u['card']['name'].lower() != cmd_name.lower()]
+                            title = f"Combo #{i+1}: {', '.join(other_cards[:2])}"
+                            with st.expander(title):
+                                for u in uses: st.write(f"- {u['card']['name']}")
+                                res = [r['name'] for r in c.get('results', [])]
+                                st.success(f"🎯 {', '.join(res)}")
+                                st.caption(c.get('description', 'Nessuna descrizione.'))
+                    else:
+                        st.info("Nessuna combo trovata o database momentaneamente non raggiungibile.")
+                except:
+                    st.error("Errore critico nel caricamento delle combo.")
+
+            with tab2:
+                suggestions = get_suggestions(cmd_data['color_identity'])
+                cols = st.columns(3)
+                for i, s in enumerate(suggestions):
+                    with cols[i % 3]:
+                        st.write(f"**{s['name']}**")
+                        st.caption(f"{s.get('prices', {}).get('eur', 'N/A')}€")
+
+    # --- SEZIONE BUDGET ---
+    st.divider()
+    st.subheader("📝 Mainboard Builder (99 carte)")
+    lista_deck = st.text_area("Incolla lista:", height=150)
+    
+    if st.button("Verifica Budget", type="primary"):
+        if lista_deck:
+            totale = 0.0
+            linee = [l.strip() for l in lista_deck.split("\n") if l.strip()]
+            with st.expander("Dettaglio Prezzi"):
+                for l in linee:
+                    nome = re.sub(r'^(\d+x?|x)\s+', '', l).split(' (')[0].strip()
+                    if nome.lower() != cmd_name.lower():
+                        p = get_market_price(nome)
+                        totale += p
+                        st.write(f"{nome}: {p:.2f}€")
+            
+            st.divider()
+            st.metric("TOTALE (Senza Cmd)", f"{totale:.2f} €", delta=f"{100-totale:.2f} €", delta_color="normal" if totale <= 100 else "inverse")
+            if totale > 100: st.error("Sei sopra i 100€!")
+            else: st.balloons()
         r = requests.get(url, timeout=10).json()
         return r.get('data', [])[:12]
     except:
