@@ -4,17 +4,14 @@ import re
 import time
 import urllib.parse
 
-# 1. Configurazione Iniziale
-st.set_page_config(page_title="Commander Architect v2.6", page_icon="🧙‍♂️", layout="wide")
+st.set_page_config(page_title="Commander Architect v2.7", page_icon="🧙‍♂️", layout="wide")
 
-# 2. Funzioni API
 def get_card(name):
     try:
         url = f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(name)}"
         r = requests.get(url, timeout=10)
         return r.json() if r.status_code == 200 else None
-    except:
-        return None
+    except: return None
 
 def get_market_price(card_name):
     try:
@@ -22,8 +19,7 @@ def get_market_price(card_name):
         r = requests.get(url, timeout=10).json()
         prices = [float(p['prices']['eur']) for p in r['data'] if p.get('prices', {}).get('eur')]
         return min(prices) if prices else 0.0
-    except:
-        return 0.0
+    except: return 0.0
 
 def get_suggestions(colors):
     try:
@@ -32,29 +28,26 @@ def get_suggestions(colors):
         url = f"https://api.scryfall.com/cards/search?q={urllib.parse.quote(query)}&order=edhrec"
         r = requests.get(url, timeout=10).json()
         return r.get('data', [])[:12]
-    except:
-        return []
+    except: return []
 
 def get_combos(commander_name):
-    """Cerca combo con gestione errori DNS"""
-    url = f"https://backend.commandspellbook.com/variants/?q={urllib.parse.quote(commander_name)}"
+    safe_name = urllib.parse.quote(commander_name)
+    url = f"https://backend.commandspellbook.com/variants?q={safe_name}"
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
     try:
-        r = requests.get(url, headers=headers, timeout=12)
+        r = requests.get(url, headers=headers, timeout=20)
         if r.status_code == 200:
             data = r.json()
             return data.get('results', []) if isinstance(data, dict) else data
         return []
-    except:
-        return None
+    except: return None
 
-# 3. Interfaccia Utente
 st.title("🧙‍♂️ Commander Deck Architect")
-st.markdown("##### Budget 100€ (Comandante Escluso)")
+st.caption("v2.7 - Database: Scryfall & Commander Spellbook")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    cmd_input = st.text_input("Nome Comandante:", placeholder="Es: Ghave, Guru of Spores")
+    cmd_input = st.text_input("Comandante (Inglese):", placeholder="Es: Ghave, Guru of Spores")
 
 if cmd_input:
     cmd_data = get_card(cmd_input)
@@ -62,14 +55,14 @@ if cmd_input:
         col1, col2 = st.columns([1, 2])
         with col1:
             st.image(cmd_data['image_uris']['normal'], use_container_width=True)
-            st.metric("Prezzo Comandante", f"{cmd_data.get('prices', {}).get('eur', '0.00')} €")
+            st.metric("Costo Escluso", f"{cmd_data.get('prices', {}).get('eur', '0.00')} €")
         
         with col2:
             t1, t2 = st.tabs(["🔥 Top 10 Combo", "💡 Suggerimenti"])
             with t1:
-                combos = get_combos(cmd_input)
-                if combos is None:
-                    st.warning("⚠️ Database Combo non raggiungibile.")
+                with st.spinner("Cercando combo..."):
+                    combos = get_combos(cmd_input)
+                if combos is None: st.warning("⚠️ Errore di connessione al database combo.")
                 elif combos:
                     for i, c in enumerate(combos[:10]):
                         uses = c.get('uses', [])
@@ -79,8 +72,7 @@ if cmd_input:
                             res = [r['name'] for r in c.get('results', [])]
                             st.success(f"🎯 {', '.join(res)}")
                             st.caption(c.get('description', ''))
-                else:
-                    st.info("Nessuna combo trovata.")
+                else: st.info("Nessuna combo trovata.")
             with t2:
                 suggerimenti = get_suggestions(cmd_data['color_identity'])
                 sc1, sc2, sc3 = st.columns(3)
@@ -89,9 +81,8 @@ if cmd_input:
                     target.write(f"**{s['name']}**")
                     target.caption(f"{s.get('prices', {}).get('eur', 'N/A')} €")
 
-    # 4. Calcolo Budget
     st.divider()
-    deck_list = st.text_area("Incolla la lista (99 carte):", height=200)
+    deck_list = st.text_area("Lista Mainboard (99 carte):", height=200)
     if st.button("Verifica Budget", type="primary"):
         if deck_list:
             linee = [l.strip() for l in deck_list.split("\n") if l.strip()]
@@ -99,13 +90,10 @@ if cmd_input:
             with st.expander("Dettaglio Prezzi"):
                 for riga in linee:
                     nome = re.sub(r'^(\d+x?|x)\s+', '', riga).split(' (')[0].strip()
-                    if nome.lower() == cmd_input.lower():
-                        continue
+                    if nome.lower() == cmd_input.lower(): continue
                     p = get_market_price(nome)
                     totale += p
                     st.write(f"{nome}: {p:.2f} €")
-            
-            st.divider()
             st.metric("TOTALE", f"{totale:.2f} €", delta=f"{100-totale:.2f} €", delta_color="normal" if totale<=100 else "inverse")
             if totale <= 100: st.balloons()
             else: st.error("Fuori budget!")
